@@ -1,10 +1,12 @@
 // ==UserScript==
-// @name         Rapid Form Filler
+// @name         Universal Google Form Autofiller
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  A high-speed, configurable user script to automatically fill Google Forms in milliseconds, designed for time-sensitive applications.
+// @version      2025.08.18.1
+// @description  Auto-fills Google Forms reliably (text, radio, checkbox) with flexible matching. Highly customizable.
 // @author       github.com/kunalmttl
 // @match        https://docs.google.com/forms/d/e/*
+// @match        https://docs.google.com/forms/d/e/*/viewform
+// @match        https://docs.google.com/forms/d/e/*/formResponse
 // @match        https://forms.gle/*
 // @grant        none
 // @license      MIT
@@ -14,153 +16,208 @@
     'use strict';
 
     /*********************************************************************************************
-     *                                                                                           *
-     *   =============================== CONFIGURATION ===============================           *
-     *   This is the only section you need to edit. Follow the instructions carefully.           *
-     *                                                                                           *
+     *                                   🚀 HOW TO USE THIS SCRIPT
+     *
+     * 1. Install the Tampermonkey extension in your browser.
+     * 2. Copy-paste this entire script into a new Tampermonkey userscript.
+     * 3. Edit the CONFIGURATION sections below:
+     *      - Map your Google Form questions to short keys (`potentialQuestionsMap`).
+     *      - Fill your personal answers inside `myAnswers`.
+     * 4. Open your target Google Form and watch the script auto-fill it.
+     *
+     *  NOTES:
+     *   - The script supports TEXT, EMAIL, NUMBER, RADIO BUTTONS, and CHECKBOXES.
+     *   - Matching is case-insensitive and fuzzy (so “Yes” ≈ “yes” ≈ “YES”).
+     *   - If the form layout changes, update the container class (default: `.Qr7Oae`).
+     *
      *********************************************************************************************/
 
-    /**
-     * PART 1: The Question Map
-     * ------------------------
-     * Why: Google Forms can have slightly different questions (e.g., "Full Name" vs "Your Name").
-     *      This map connects all possible question phrases to a single, simple key.
-     * How:
-     *   1. On the left side (in quotes), write a potential question phrase in all lowercase.
-     *   2. On the right side (in quotes), give it a simple, unique key (e.g., "fullName").
-     *   3. Add as many variations for each question as you can think of.
-     */
-  
+
+    /*********************************************************************************************
+     * PART 1: QUESTION MAP
+     * -------------------------------------------------------------------------------------------
+     * Why: Google Forms questions may be worded differently (e.g., "Roll No" vs "Student ID").
+     * This map links all possible question texts to a simple, unique key.
+     *
+     * How to use:
+     *   - The **left side**: phrases you expect to see in the form (lowercase, flexible).
+     *   - The **right side**: a short key that YOU define and will use in `myAnswers`.
+     *
+     *********************************************************************************************/
     const potentialQuestionsMap = {
-        // --- Example: Name Variations ---
-        "full name": "fullName",
-        "name": "fullName",
-        "student's name": "fullName",
-        "your name": "fullName",
+        // --- Identification ---
+        "student id": "sid", "sid": "sid", "roll no.": "sid", "roll number": "sid",
 
-        // --- Example: Email Variations ---
-        "email address": "email",
-        "email": "email",
-        "e-mail address": "email",
-        "registered email": "email",
+        // --- Name ---
+        "full name": "fullName", "name": "fullName", "student's name": "fullName", "your name": "fullName",
 
-        // --- Example: Student ID Variations ---
-        "student id": "sid",
-        "sid": "sid",
-        "roll number": "sid",
-        "roll no": "sid",
+        // --- Email ---
+        "email address": "email", "email": "email", "pec email": "email", "e-mail address": "email",
+        "college e-mail address": "email", "registered email": "email",
 
-        // --- Example: Choice/Radio Button Variations ---
+        // --- Phone ---
+        "phone number": "phone", "contact no": "phone", "mobile number": "phone",
+
+        // --- Payment/Transaction ---
+        "transaction id": "txId", "payment reference": "txId", "reference number": "txId",
+        "fee receipt number": "txId", "utr number": "txId",
+
+        // --- Aadhar ---
+        "aadhar": "aadhar", "aadhar card no": "aadhar", "aadhar card number": "aadhar",
+
+        // --- Hostel related ---
+        "hostel": "hostel", "hostel you will be staying in": "hostel",
+        "are you a previous hosteller": "isHosteller",
+
+        // --- Year / Academic ---
+        "select your year": "year", "year": "year", "your current year": "year",
+
+        // --- Parents ---
+        "enter your parent's name": "parentName",
+        "parent's aadhar card number": "parentAadhar",
+
+        // --- General ---
         "gender": "gender",
         "branch": "branch",
-        "year": "year",
-
-        // ADD ALL YOUR OTHER POTENTIAL QUESTIONS HERE
-    };
-
-    /**
-     * PART 2: Your Answers
-     * --------------------
-     * Why: This is where you store the actual data that will be filled into the form.
-     * How:
-     *   1. On the left side (in quotes), use the simple key you defined in the `potentialQuestionsMap`.
-     *   2. On the right side (in quotes), write your exact answer.
-     *   3. Make sure every key from the map has a corresponding answer here.
-     */
-    const myAnswers = {
-        // --- Use the keys from PART 1 to provide your answers ---
-        "fullName": "Your Full Name",
-        "email": "your.email@example.com",
-        "sid": "12345678",
-        
-        // For Radio Buttons or Dropdowns, the answer must EXACTLY match the option text.
-        "gender": "Male",
-        "branch": "Electrical Engineering",
-        "year": "3rd Year",
-        
-        // ADD ALL YOUR OTHER ANSWERS HERE
     };
 
 
     /*********************************************************************************************
-     *                                                                                           *
-     *   ================================= CORE LOGIC =================================          *
-     *   DO NOT EDIT BELOW THIS LINE unless you know what you are doing.                         *
-     *                                                                                           *
+     * PART 2: YOUR ANSWERS
+     * -------------------------------------------------------------------------------------------
+     * Why: This is where you store the answers to be filled in automatically.
+     *
+     * How to use:
+     *   - The **left side**: the simple keys you defined in the `potentialQuestionsMap`.
+     *   - The **right side**: your actual answers (strings, numbers, or arrays for checkboxes).
+     *
+     *   NOTE: For radio buttons & dropdowns → answer text MUST match the option’s text.
+     *         For checkboxes → you can use an array: ["Option 1", "Option 2"].
+     *********************************************************************************************/
+    const myAnswers = {
+        "sid": "blank",
+        "fullName": "blank",
+        "email": "blank",
+        "phone": "blank",
+        "txId": "blank",
+        "aadhar": "blank",
+        "isHosteller": "blank",
+        "year": "blank",
+        "hostel": "blank",
+        "parentName": "blank",
+        "parentAadhar": "blank",
+        "gender": "blank",
+        "branch": "blank"
+    };
+
+
+    /*********************************************************************************************
+     * PART 3: CORE LOGIC
+     * -------------------------------------------------------------------------------------------
+     * You don’t need to touch this unless Google Forms changes its DOM structure.
+     * Handles:
+     *   ✅ Text Inputs
+     *   ✅ Emails
+     *   ✅ Numbers
+     *   ✅ Radio Buttons (with fuzzy matching)
+     *   ✅ Checkboxes (with fuzzy matching)
      *********************************************************************************************/
 
-    /**
-     * THE GOLDEN RULE: If the script doesn't work, it's almost always because the "question container"
-     * class name used by Google has changed. See the README on GitHub for how to find the new one.
-     */
-    const GOOGLE_FORM_QUESTION_CONTAINER_CLASS = '.Qr7Oae';
+    // Utility: Normalize text (case-insensitive, collapse spaces)
+    function normalize(s){
+        return (s||"").toLowerCase().replace(/\s+/g," ").trim();
+    }
 
-    // Function to find the correct answer key for a given question label
-    function findKeyForLabel(label) {
-        const normalizedLabel = label.toLowerCase();
-        for (const key in potentialQuestionsMap) {
-            if (normalizedLabel.includes(key)) {
-                return potentialQuestionsMap[key];
-            }
+    // Utility: Match a label to one of our keys
+    function findKeyForLabel(label){
+        const norm = normalize(label);
+        for(const k in potentialQuestionsMap){
+            if(norm.includes(k)) return potentialQuestionsMap[k];
         }
         return null;
     }
 
-    // Main function to fill the form
-    function fillTheForm() {
-        console.log("🚀 Form Filler Pro: Starting high-speed fill...");
-        const questionContainers = document.querySelectorAll(GOOGLE_FORM_QUESTION_CONTAINER_CLASS);
+    // Utility: Safe click simulation
+    function simulateClick(el){ if(el) el.click(); }
 
-        if (questionContainers.length === 0) {
-            console.error(`❌ Form Filler Pro: Could not find any question containers with the class "${GOOGLE_FORM_QUESTION_CONTAINER_CLASS}". The form structure might have changed! See the project README for instructions on how to fix this.`);
+    // Main autofill engine
+    function fillTheForm(){
+        console.log("🚀 Starting Form Autofill...");
+        const questionContainers = document.querySelectorAll('.Qr7Oae'); // Google Form question wrapper
+
+        if(!questionContainers.length){
+            console.warn("❌ No question containers found. Update the class if Google changes DOM.");
             return;
         }
 
-        questionContainers.forEach(container => {
-            const labelElement = container.querySelector('.M7eMe');
-            if (!labelElement || !labelElement.innerText) return;
-            const labelText = labelElement.innerText.trim();
-            const answerKey = findKeyForLabel(labelText);
+        let filled = 0;
 
-            if (!answerKey) {
-                console.warn(`🤔 Form Filler Pro: No match found for question: "${labelText}"`);
+        questionContainers.forEach(c=>{
+            const labelEl = c.querySelector('.M7eMe'); // Question text
+            if(!labelEl) return;
+
+            const labelText = labelEl.innerText.trim();
+            if(!labelText) return;
+
+            const key = findKeyForLabel(labelText);
+            if(!key) return;
+
+            const ans = myAnswers[key];
+            if(ans === undefined) return;
+
+            // --- TEXT / EMAIL / NUMBER INPUTS ---
+            const input = c.querySelector('input[type="text"],input[type="email"],input[type="number"],textarea');
+            if(input){
+                input.value = ans;
+                input.dispatchEvent(new Event('input',{bubbles:true}));
+                console.log(`✅ Filled TEXT: ${labelText} -> ${ans}`);
+                filled++;
                 return;
             }
 
-            const answer = myAnswers[answerKey];
-            if (answer === undefined) {
-                console.warn(`❓ Form Filler Pro: No answer provided for key: "${answerKey}"`);
-                return;
-            }
-
-            // Logic for Text and Number inputs
-            const textInput = container.querySelector('input[type="text"], input[type="email"], input[type="number"]');
-            if (textInput && typeof answer === 'string') {
-                textInput.value = answer;
-                // This 'input' event is the magic that makes Google Forms recognize the change.
-                textInput.dispatchEvent(new Event('input', { bubbles: true }));
-                console.log(`✅ Filled [Text]: "${labelText}"`);
-                return;
-            }
-
-            // Logic for Radio Buttons and Checkboxes
-            const choiceOptions = container.querySelectorAll('.uVccjd');
-            if (choiceOptions.length > 0) {
-                choiceOptions.forEach(choice => {
-                    const choiceText = choice.querySelector('.v3o3I, .Y5sE8d')?.innerText.trim();
-                    if (choiceText && choiceText === answer) {
-                        choice.click();
-                        console.log(`✅ Clicked [Choice]: "${labelText}" -> "${choiceText}"`);
+            // --- RADIO BUTTONS ---
+            const radios = c.querySelectorAll('[role="radio"], .uVccjd, .docssharedWizToggleLabeledContainer');
+            if(radios.length){
+                const ansNorm = normalize(String(ans));
+                for(const r of radios){
+                    const txt = (r.innerText||"").trim();
+                    if(!txt) continue;
+                    const txtNorm = normalize(txt);
+                    if(txtNorm===ansNorm || txtNorm.includes(ansNorm) || ansNorm.includes(txtNorm)){
+                        simulateClick(r);
+                        console.log(`✅ Selected RADIO: ${labelText} -> ${txt}`);
+                        filled++;
+                        break;
                     }
-                });
+                }
+                return;
+            }
+
+            // --- CHECKBOXES ---
+            const checks = c.querySelectorAll('[role="checkbox"]');
+            if(checks.length){
+                const ansList = Array.isArray(ans)?ans:[ans];
+                for(const a of ansList){
+                    const ansNorm = normalize(String(a));
+                    for(const ck of checks){
+                        const txt = (ck.innerText||"").trim();
+                        if(!txt) continue;
+                        const txtNorm = normalize(txt);
+                        if(txtNorm===ansNorm || txtNorm.includes(ansNorm) || ansNorm.includes(txtNorm)){
+                            simulateClick(ck);
+                            console.log(`✅ Checked BOX: ${labelText} -> ${txt}`);
+                            filled++;
+                        }
+                    }
+                }
+                return;
             }
         });
-        console.log("🎉 Form Filler Pro: Fill complete! Manually handle file uploads and click submit.");
+
+        console.log(`🎉 Done! Filled ${filled} fields.`);
     }
 
-    // Run the script once the page is fully loaded.
-    window.addEventListener('load', () => {
-        setTimeout(fillTheForm, 150);
-    });
+    // Run after page load
+    window.addEventListener('load',()=>{ setTimeout(fillTheForm,500); });
 
 })();
